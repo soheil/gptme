@@ -1,0 +1,5 @@
+# ignore everything in gpt/
+gpt/*
+
+# exclude sample.md
+!gpt/sample.md

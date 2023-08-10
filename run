@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+
+# to use a different python installation change above patth
+# this works for brew installations: "#!/opt/homebrew/bin/python3"
+
+
+import os
+import sys
+import argparse
+import openai
+import time
+import subprocess
+import re
+import json
+import signal
+import threading
+import queue
+
+
+# specify your api key here if not in an env var
+openai_api_key = os.environ['OPENAI_API_KEY']
+delimiter = '---==--==---'
+
+
+def main():
+  description = 'README style GPT conversations for any IDE. Use --usage for usage details.'
+  parser = argparse.ArgumentParser(description=description)
+  parser.add_argument('--usage', action='store_true',
+                      help='prints the usage of this program')
+
+  args = parser.parse_args()
+
+  if args.usage:
+    print("""
+    Add a hook in your IDE to run a command on save for files in ~/gptme/gpt
+
+    In Sublime Text you can use a package called "Command on Save" and add this to the settings:
+
+    {
+      "commands": {
+        "/Users/soheil/gptme/gpt/": [
+          "/Users/soheil/gptme/run"
+        ]
+      }
+    }
+
+    First character(s) has special meaning:
+
+      4                       Utilize GPT4 if available, GPT3.5 is the default.
+      [space] or [new line]   Only send the current prompt in the thread to reduce number of tokens used (cost).
+      mm                      Generate image from the prompt. Open '~/gptme/gpt/img.png' to view.
+
+      Custom Instructions
+        The following are passed to the "system" role before any conversation.
+
+      =                       System: fix any garammar in the user prompt using excellent English, keep any foul language.
+                              This is good for quick and dirty rephrasing of a thought for posting to social media, etc.
+
+      .                       System: give me very short and concise answers and ignore all the niceties that openai programmed you with.
+                              Good for avoiding long-winded answers and all the "apologies" and things like "as an AI language model.."
+
+      /                       System: walk through your thinking process step by step.
+                              It has been demonstrated that asking it to show its thought process actually improves results.
+
+    Get usage details: ./run --usage
+    """)
+    exit()
+
+
+  dir = os.path.dirname(os.path.abspath(__file__)) + '/gpt/'
+  file = os.popen("""
+  cd "{}"
+  echo `ls -t *.md | head -n 1`
+  """.format(dir)).read().strip()
+
+  if file == 'run':
+    print('exited')
+    exit()
+
+  with open(dir + file, 'r') as f:
+    content = f.read()
+    original_content = content
+
+  arr = content.split(delimiter)
+
+  if len(sys.argv) > 1 and sys.argv[1] == 'revert':
+    with open(dir + file, 'w') as f:
+      f.write('\n'.join(delimiter.join(arr[2:]).split('\n')[2:]))
+    exit()
+
+  if len(arr[0]) < 5:
+    print('less than 5')
+    exit()
+
+  with open(dir + file, 'w') as f:
+    f.write("\n\n" + delimiter + "\n\n")
+
+
+  openai.api_key = openai_api_key
+
+  # show a spinner in macOS MenuBar
+  subprocess.Popen([os.path.join(dir, '../progress-bar')])
+
+  # jump the cursor to the top of the current file in IDE
+  subprocess.Popen(
+    ['osascript', '-e', 'tell application "System Events" to keystroke (key code 126) using {command down}'])
+
+  model = 'gpt-3.5-turbo'
+  if content[:1] == '4' or content[:2] == ' 4' or content[:2] == "\n4" or content[:4] == "\n\n4":
+    model = 'gpt-4'
+    content = re.sub(r'^( *)\n{0,2}4', r'\1', content)
+
+  if content[:2] == 'mm':
+    response = openai.Image.create(
+      prompt=content[3:],
+      n=1,
+      size='512x512'
+    )
+    image_url = response['data'][0]['url']
+    print(os.popen("/usr/local/bin/wget -O {}/img.png '{}'".format(dir, image_url)))
+    exit()
+
+  arr = arr[:1] if content[:1] in [' ', '\n'] else (
+      arr[::-1] if content[:2] == '..' else
+      [x if i % 2 == 0 or i == 1 else '' for i, x in enumerate(arr)][::-1])
+
+
+  messages = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': x}
+              for i, x in enumerate(arr)]
+
+  if content[:1] == '=' or content[:2] == '=':
+    messages.insert(0, {'role': 'system', 'content': 'fix any garammar in the user prompt using excellent English, keep any foul language.'})
+
+  elif content[:1] == '/' or content[:2] == '/':
+    messages.insert(0, {'role': 'system', 'content': 'walk through your thinking process step by step'})
+
+  elif content[:1] == '.' or content[:2] == '.':
+    messages.insert(0, {'role': 'system', 'content': 'give me very short and concise answers and ignore all the niceties that openai programmed you with.'})
+
+
+  terminating = False
+  q = queue.Queue()
+
+  def signal_handler(sig, frame):
+    # Add your command to run here
+    print("\nCtrl+C detected! Running a command before exiting...")
+
+    with open(dir + file, "w") as f:
+      f.write(original_content)
+
+    sys.exit(0)
+
+  # Register the signal handler
+  signal.signal(signal.SIGINT, signal_handler)
+
+
+  res = openai.ChatCompletion.create(
+      model=model,
+      # model="gpt-3.5-turbo",
+      # model="gpt-4",
+      # model="gpt-4-32k",
+      messages=messages,
+      stream=True
+  )
+
+
+  # append the streamed result back to the file for the IDE to reload
+  def thread_write_to_file(q):
+    while not terminating:
+      with open(dir + file, "a") as f:
+        f.write(q.get())
+        q.task_done()
+
+  # in case IDE prompts to reload file, this repeatedly presses Esc
+  def thread_call_timer():
+    return
+    while not terminating:
+      os.system("""
+      osascript -e '
+      tell application "System Events"
+          set activeApp to name of first application process whose frontmost is true
+      end tell
+      if activeApp is "sublime_text" then
+          tell application "System Events" to key code 53
+      end if
+      '
+      """)
+      time.sleep(2)
+
+
+  msg = ''
+  chunk = ''
+  i = 0
+  ii = 0
+  start_time = None
+
+  thread1 = threading.Thread(target=thread_write_to_file, args=(q,))
+  thread1.daemon = True
+  thread1.start()
+
+  thread2 = threading.Thread(target=thread_call_timer)
+  thread2.daemon = True
+  thread2.start()
+
+
+  last_execution_time = time.time()
+  for resp in res:
+    if not start_time:
+      start_time = time.time()
+
+    try:
+      chunk = resp.choices[0].delta.content
+      q.put(chunk)
+      i += 1
+      msg += chunk
+    except:
+      print('..')
+
+
+  # write the final result back to the file and replace all content of the file after all the incremental appends
+  with open(dir + file, 'w') as f:
+    f.write("\n\n" + delimiter + "\n\n" + msg.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", '') +
+            "\n\n" + delimiter + "\n\n" + content.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", ''))
+
+
+  # allows threads to break out of their infinite loop and terminate
+  terminating = True
+  q.put('')
+
+  # move focus back to IDE and press Esc to dismiss any dialog windows asking if ok to file, etc.
+  os.system("""sleep 0.6;osascript -e 'tell application "Sublime Text" to activate' -e 'tell application "System Events" to key code 53'""")
+
+
+if __name__ == "__main__":
+    main()
