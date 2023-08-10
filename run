@@ -86,9 +86,12 @@ def main():
   arr = content.split(delimiter)
 
   if args.revert:
-    with open(dir + file, 'w') as f:
-      f.write('\n'.join(delimiter.join(arr[2:]).split('\n')[2:]))
-    exit()
+    file_path = os.path.join(dir, file)
+    modified_time = os.path.getmtime(file_path)
+    if time.time() - modified_time <= 30:
+      with open(file_path, 'w') as f:
+        f.write('\n'.join(delimiter.join(arr[2:]).split('\n')[2:]))
+      exit()
 
   if len(arr[0]) < 5:
     print('less than 5')
