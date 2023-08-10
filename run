@@ -27,6 +27,8 @@ def main():
   parser = argparse.ArgumentParser(description=description)
   parser.add_argument('--usage', action='store_true',
                       help='prints the usage of this program')
+  parser.add_argument('--revert', action='store_true',
+                      help='removes the last response from the current chat thread so it is easier to modify the prompt and try again')
 
   args = parser.parse_args()
 
@@ -83,7 +85,7 @@ def main():
 
   arr = content.split(delimiter)
 
-  if len(sys.argv) > 1 and sys.argv[1] == 'revert':
+  if args.revert:
     with open(dir + file, 'w') as f:
       f.write('\n'.join(delimiter.join(arr[2:]).split('\n')[2:]))
     exit()
