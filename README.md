@@ -5,7 +5,7 @@ This script is a command-line utility that works as an interface for the OpenAI 
 
 ### Usage
 
-Create a .md readme file in your favorite IDE inside `gpt/` dir and start typing and press save to talk to ChatGPT.
+Create a .md readme file in your favorite IDE inside `gpt/` dir and start typing and press save to talk to ChatGPT, see [sample.md](/gpt/sample.md).
 
 Prefix | Function
 --------|---------
