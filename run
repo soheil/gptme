@@ -18,7 +18,7 @@ import queue
 
 
 # specify your api key here if not in an env var
-openai_api_key = os.environ['OPENAI_API_KEY']
+openai.api_key = os.environ['OPENAI_API_KEY']
 delimiter = '---==--==---'
 
 
@@ -98,7 +98,6 @@ def main():
     f.write("\n\n" + delimiter + "\n\n")
 
 
-  openai.api_key = openai_api_key
 
   # show a spinner in macOS MenuBar
   subprocess.Popen([os.path.join(dir, '../progress-bar')])
@@ -109,6 +108,11 @@ def main():
 
   model = 'gpt-3.5-turbo'
   if content[:1] == '4' or content[:2] == ' 4' or content[:2] == "\n4" or content[:4] == "\n\n4":
+    # use an API key for an account with GPT4 if you prefer to use a different key
+    try:
+      openai.api_key = os.environ['OPENAI_API_KEY4']
+    except KeyError:
+      pass
     model = 'gpt-4'
     content = re.sub(r'^( *)\n{0,2}4', r'\1', content)
 
@@ -154,7 +158,6 @@ def main():
 
   # Register the signal handler
   signal.signal(signal.SIGINT, signal_handler)
-
 
   res = openai.ChatCompletion.create(
       model=model,
