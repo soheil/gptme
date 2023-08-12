@@ -7,7 +7,6 @@
 import os
 import sys
 import argparse
-import openai
 import time
 import subprocess
 import re
@@ -17,16 +16,17 @@ import threading
 import queue
 
 
-# specify your api key here if not in an env var
-openai.api_key = os.environ['OPENAI_API_KEY']
-delimiter = '---==--==---'
-
-
 def main():
+  # specify your api key here if not in an env var
+  OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+  DELIMETER = '---==--==---'
+
   description = 'README style GPT conversations for any IDE. Use --usage for usage details.'
   parser = argparse.ArgumentParser(description=description)
   parser.add_argument('--usage', action='store_true',
                       help='prints the usage of this program')
+  parser.add_argument('--new-file', action='store_true',
+                      help='creates a new conversation file for future use')
   parser.add_argument('--revert', action='store_true',
                       help='removes the last response from the current chat thread so it is easier to modify the prompt and try again')
 
@@ -68,8 +68,18 @@ def main():
     """)
     exit()
 
-
   dir = os.path.dirname(os.path.abspath(__file__)) + '/gpt/'
+
+  if args.new_file:
+    os.popen("""
+      find {} -type f -empty -delete
+      FILE="{}$(date '+%Y-%m-%d_%H:%M:%S').md"
+      touch "$FILE"
+      {} "$FILE"
+    """.format(dir, dir, os.environ.get('EDITOR', '/usr/local/bin/subl')))
+    exit()
+
+
   file = os.popen("""
   cd "{}"
   echo `ls -t *.md | head -n 1`
@@ -83,14 +93,14 @@ def main():
     content = f.read()
     original_content = content
 
-  arr = content.split(delimiter)
+  arr = content.split(DELIMETER)
 
   if args.revert:
     file_path = os.path.join(dir, file)
     modified_time = os.path.getmtime(file_path)
     if time.time() - modified_time <= 30:
       with open(file_path, 'w') as f:
-        f.write('\n'.join(delimiter.join(arr[2:]).split('\n')[2:]))
+        f.write('\n'.join(DELIMETER.join(arr[2:]).split('\n')[2:]))
       exit()
 
   if len(arr[0]) < 5:
@@ -98,7 +108,7 @@ def main():
     exit()
 
   with open(dir + file, 'w') as f:
-    f.write("\n\n" + delimiter + "\n\n")
+    f.write("\n\n" + DELIMETER + "\n\n")
 
 
 
@@ -112,10 +122,7 @@ def main():
   model = 'gpt-3.5-turbo'
   if content[:1] == '4' or content[:2] == ' 4' or content[:2] == "\n4" or content[:4] == "\n\n4":
     # use an API key for an account with GPT4 if you prefer to use a different key
-    try:
-      openai.api_key = os.environ['OPENAI_API_KEY4']
-    except KeyError:
-      pass
+    OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY4', OPENAI_API_KEY)
     model = 'gpt-4'
     content = re.sub(r'^( *)\n{0,2}4', r'\1', content)
 
@@ -162,6 +169,8 @@ def main():
   # Register the signal handler
   signal.signal(signal.SIGINT, signal_handler)
 
+  import openai
+  openai.api_key = OPENAI_API_KEY
   res = openai.ChatCompletion.create(
       model=model,
       # model="gpt-3.5-turbo",
@@ -227,8 +236,8 @@ def main():
 
   # write the final result back to the file and replace all content of the file after all the incremental appends
   with open(dir + file, 'w') as f:
-    f.write("\n\n" + delimiter + "\n\n" + msg.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", '') +
-            "\n\n" + delimiter + "\n\n" + content.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", ''))
+    f.write("\n\n" + DELIMETER + "\n\n" + msg.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", '') +
+            "\n\n" + DELIMETER + "\n\n" + content.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", ''))
 
 
   # allows threads to break out of their infinite loop and terminate
