@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 
 # to use a different python installation change above patth
 # this works for brew installations: "#!/opt/homebrew/bin/python3"
@@ -29,6 +29,10 @@ def main():
                       help='creates a new conversation file for future use')
   parser.add_argument('--revert', action='store_true',
                       help='removes the last response from the current chat thread so it is easier to modify the prompt and try again')
+  parser.add_argument('--stop', action='store_true',
+                      help='if currently running stops and refills the thread, otherwise reverts the last reply')
+  parser.add_argument('--copy-code', action='store_true',
+                      help='copy the first code block into clipboard')
 
   args = parser.parse_args()
 
@@ -48,7 +52,7 @@ def main():
 
     First character(s) has special meaning:
 
-      4                       Utilize GPT4 if available, GPT3.5 is the default.
+      4                       Utilize GPT3.5, GPT4 is the default.
       [space] or [new line]   Only send the current prompt in the thread to reduce number of tokens used (cost).
       mm                      Generate image from the prompt. Open '~/gptme/gpt/img.png' to view.
 
@@ -93,15 +97,38 @@ def main():
     content = f.read()
     original_content = content
 
+  if args.copy_code:
+    pattern=r'```\w{0,15}\n(.*?)```'
+    result = re.search(pattern, content, re.DOTALL)
+    code = result.group(1).strip()
+
+    process = subprocess.Popen('pbcopy', stdin=subprocess.PIPE)
+    process.communicate(code.encode('utf-8'))
+
+    exit()
+
+
   arr = content.split(DELIMETER)
 
-  if args.revert:
+  stop_and_revert = False
+  if args.stop:
+    os.system("kill -2 $(ps aux | grep 'chat/run' | grep -v grep | awk '{print $2}')")
     file_path = os.path.join(dir, file)
-    modified_time = os.path.getmtime(file_path)
-    if time.time() - modified_time <= 30:
+    if os.path.exists(file_path + '.swp'):
+      with open(file_path + '.swp', 'r') as f:
+        swap_content = f.read()
+      os.system('rm ' + dir + file + '.swp')
       with open(file_path, 'w') as f:
-        f.write('\n'.join(DELIMETER.join(arr[2:]).split('\n')[2:]))
+        f.write(content + "\n\n" + DELIMETER + "\n\n" + swap_content)
       exit()
+    else:
+      stop_and_revert = True
+
+  if args.revert or stop_and_revert:
+    file_path = os.path.join(dir, file)
+    with open(file_path, 'w') as f:
+      f.write('\n'.join(DELIMETER.join(arr[2:]).split('\n')[2:]))
+    exit()
 
   if len(arr[0]) < 5:
     print('less than 5')
@@ -116,27 +143,57 @@ def main():
   subprocess.Popen([os.path.join(dir, '../progress-bar')])
 
   # jump the cursor to the top of the current file in IDE
-  subprocess.Popen(
-    ['osascript', '-e', 'tell application "System Events" to keystroke (key code 126) using {command down}'])
+  # subprocess.Popen(
+  #   ['osascript', '-e', 'tell application "System Events" to keystroke (key code 126) using {command down}'])
+
+  import openai
+  openai.api_key = OPENAI_API_KEY
 
   model = 'gpt-3.5-turbo'
   if content[:1] == '4' or content[:2] == ' 4' or content[:2] == "\n4" or content[:4] == "\n\n4":
-    # use an API key for an account with GPT4 if you prefer to use a different key
+  # if content[:1] == '3' or content[:2] == ' 3' or content[:2] == "\n3" or content[:3] == "\n\n3":
+    content = content[1:]
+    # use an API key for an account with GPT3 if you prefer to use a different key
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY4', OPENAI_API_KEY)
     model = 'gpt-4'
     content = re.sub(r'^( *)\n{0,2}4', r'\1', content)
 
-  if content[:2] == 'mm':
-    response = openai.Image.create(
-      prompt=content[3:],
-      n=1,
-      size='512x512'
-    )
-    image_url = response['data'][0]['url']
-    print(os.popen("/usr/local/bin/wget -O {}/img.png '{}'".format(dir, image_url)))
+  if content[1:3] == 'mm':
+    with open(dir + file, "w") as f:
+      f.write(original_content)
+
+    n = int(content[:1])
+    if content[3:4] == 'e':
+      response = openai.Image.create_edit(
+        image=open('{}/images/edit.png'.format(dir), 'rb'),
+        mask=open('{}/images/mask.png'.format(dir), 'rb'),
+        prompt=content[4:],
+        n=n,
+        size='1024x1024'
+      )
+    elif content[3:4] == 'v':
+      # variation_image = '{}/images/img{}.png'.format(dir, content[4:5])
+      # os.system('cp {} {}'.format(variation_image, variation_image.replace('.png', '-orig.png')))
+      response = openai.Image.create_variation(
+        image=open('{}/images/edit.png'.format(dir), 'rb'),
+        # image=open(variation_image, 'rb'),
+        n=n,
+        prompt=content[4:],
+        size='1024x1024'
+      )
+    else:
+      response = openai.Image.create(
+        prompt=content[3:],
+        n=n,
+        size='512x512'
+      )
+    for i, data in enumerate(response['data']):
+      image_url = data['url']
+      print(os.popen("/usr/local/bin/wget -O {}/images/img{}.png '{}'".format(dir, i, image_url)))
+    os.system('open {}/images'.format(dir))
     exit()
 
-  arr = arr[:1] if content[:1] in [' ', '\n'] else (
+  arr = arr[:1] if content[:1] in ['XX ', 'XX\n'] else (
       arr[::-1] if content[:2] == '..' else
       [x if i % 2 == 0 or i == 1 else '' for i, x in enumerate(arr)][::-1])
 
@@ -169,8 +226,10 @@ def main():
   # Register the signal handler
   signal.signal(signal.SIGINT, signal_handler)
 
-  import openai
-  openai.api_key = OPENAI_API_KEY
+  with open(dir + file + '.swp', 'w') as f:
+    f.write(original_content)
+
+  # print(openai.Model.list())
   res = openai.ChatCompletion.create(
       model=model,
       # model="gpt-3.5-turbo",
@@ -233,19 +292,19 @@ def main():
     except:
       print('..')
 
-
   # write the final result back to the file and replace all content of the file after all the incremental appends
   with open(dir + file, 'w') as f:
     f.write("\n\n" + DELIMETER + "\n\n" + msg.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", '') +
             "\n\n" + DELIMETER + "\n\n" + content.replace("assistant:\n", '').replace("assistant: ", '').replace("Assistant: ", ''))
 
+  os.system('rm ' + dir + file + '.swp')
 
   # allows threads to break out of their infinite loop and terminate
   terminating = True
   q.put('')
 
   # move focus back to IDE and press Esc to dismiss any dialog windows asking if ok to file, etc.
-  os.system("""sleep 0.6;osascript -e 'tell application "Sublime Text" to activate' -e 'tell application "System Events" to key code 53'""")
+  # os.system("""sleep 0.6;osascript -e 'tell application "Sublime Text" to activate' -e 'tell application "System Events" to key code 53'""")
 
 
 if __name__ == "__main__":
