@@ -37,7 +37,7 @@ def decode_secret(encoded_message, key):
 def clean(data):
   if os.path.exists(dir + 'exclusions.txt'):
     with open(dir + 'exclusions.txt', 'r') as f:
-      exclude = f.read().split('\n')
+      exclusions = f.read().split('\n')
 
     for exclude in exclusions:
       regex = re.compile(r'\b\w*{0}\w*\b'.format(exclude), re.IGNORECASE)
