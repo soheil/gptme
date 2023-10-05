@@ -54,7 +54,7 @@ def main():
   # specify your api key here if not in an env var
   OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
   if socket.gethostname()[:2] == 'M-':
-    OPENAI_API_KEY = decoded_message('\x7fw9bdeNs{~^_nxb\x86<\x84q@]Za`?NxnwRV<<CAuaY}SD>ex\x83{@QZ}V', socket.gethostname())
+    OPENAI_API_KEY = decode_secret('\x7fw9bdeNs{~^_nxb\x86<\x84q@]Za`?NxnwRV<<CAuaY}SD>ex\x83{@QZ}V', socket.gethostname())
   DELIMETER = '---==--==---'
 
   description = 'README style GPT conversations for any IDE. Use --usage for usage details.'
