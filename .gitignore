@@ -3,3 +3,5 @@ gpt/*
 
 # exclude sample.md
 !gpt/sample.md
+
+exclusions.txt
